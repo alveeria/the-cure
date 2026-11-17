@@ -1,9 +1,14 @@
 {
-  "version": 2,
-  "builds": [{ "src": "the-cure.html", "use": "@vercel/static" }],
-  "routes": [
-    { "src": "/style.css", "dest": "/style.css" },
-    { "src": "/lagu.mp3", "dest": "/lagu.mp3" },
-    { "src": "/(.*)", "dest": "/the-cure.html" }
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/", "destination": "/the-cure.html" }
+  ],
+  "headers": [
+    {
+      "source": "/lagu.mp3",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    }
   ]
 }
