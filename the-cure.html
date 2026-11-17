@@ -72,7 +72,8 @@
       callLine(0.85,  3.45, "why", "cant", "you_come", "stitch", "me_up"),
       callLine(3.65,  7.00, "why", "cant", "it_ever", "be", "enough", { slowWeight: 2.8 }),
       callLine(7.30,  10.45, "why", "cant", "you_come", "stitch", "me_up"),
-      callLine(10.70, 17.80, "why", "cant", "it_ever", "be", "enough", { slowWeight: 6.8 }),
+      callLine(10.70, 14.30, "why", "cant", "it_ever", "be", "enough", { slowWeight: 3.0 }),
+      commentLine(14.60, 18.95, "IG: @frrrd.us | TikTok: @firdauss4_"),
       objLine(19.20,  23.65, "its_not", "enough", { slowWeight: 6.0 }),
       commentLine(23.95, 25.45, "........."),
       callLine(25.75, 29.40, "oh", "because", "my_head", "is_full_of", "poison", { slowWeight: 4.4, dramatic: true }),
@@ -135,6 +136,8 @@
     let smFocusX = 0, smFocusY = 0; // smoothed world-space focus the camera is anchored to
     const TAU = Math.PI * 2;
     const reduceMotionMQ = window.matchMedia("(prefers-reduced-motion: reduce)");
+    // Must match the portrait media query in style.css that turns on line wrapping
+    const wrapMQ = window.matchMedia("(orientation: portrait) and (max-width: 640px)");
     let lastFrameTime = performance.now();
 
     function measureCharWidth() {
@@ -208,6 +211,7 @@
 
       const lineEl = document.createElement("div");
       lineEl.className = "line";
+      if (lineObj.tokens.every((t) => t.c === "comment")) lineEl.classList.add("is-comment");
 
       const innerEl = document.createElement("span");
       innerEl.className = "line-inner";
@@ -248,6 +252,7 @@
         innerEl,
         settledSpan,
         scrambleSpan,
+        cursorEl,
         chars,
         charStartTimes,
         charEndTimes,
@@ -408,7 +413,12 @@
         }
         prevFocusX = rawFocusX;
         const leadPx = Math.max(0, Math.min(activeCharWidth * 5, focusVel * CAM_LEAD));
-        const focusWorldX = rawFocusX + leadPx;
+        // Portrait phones: lines wrap (CSS), so the camera never pans sideways — it only follows the cursor's row.
+        const wrapMode = wrapMQ.matches;
+        const focusWorldX = wrapMode ? 0 : rawFocusX + leadPx;
+        const focusWorldY = wrapMode
+          ? lineState.lineEl.offsetTop + lineState.cursorEl.offsetTop + lineState.cursorEl.offsetHeight * 0.5
+          : lineState.lineWorldY;
         const lineProgress = lineState.chars.length ? lineState.charIdx / lineState.chars.length : 0;
         const lineAge = Math.max(0, smoothElapsed - lineState.startAt);
 
@@ -428,8 +438,9 @@
 
         // Purely time-based zoom breath (zero feedback loop with camera velocity)
         const swipeBreath = lineState.idx > 0 ? Math.exp(-lineAge * 3.6) * 0.08 : 0;
-        const normalZoom = 1.0 + lineProgress * 0.06 - swipeBreath;
-        const dramaticZoom = 1.32;
+        // Wrapped lines must stay inside the screen, so portrait gets a much gentler zoom range
+        const normalZoom = wrapMode ? 1.0 + lineProgress * 0.04 - swipeBreath * 0.7 : 1.0 + lineProgress * 0.06 - swipeBreath;
+        const dramaticZoom = wrapMode ? 1.2 : 1.32;
         const targetScale = normalZoom * (1 - dramaticIntensity) + dramaticZoom * dramaticIntensity;
 
         // 1) Smooth the zoom first.
@@ -445,17 +456,15 @@
         //    (Smoothing camX/camY directly stacked two spring lags — worst on lower lines where lineWorldY is large.)
         if (!camInitialized) {
           smFocusX = focusWorldX;
-          smFocusY = lineState.lineWorldY;
+          smFocusY = focusWorldY;
           camInitialized = true;
         } else {
           smFocusX = smoothDamp(smFocusX, focusWorldX, camVel, "x", 0.36, dt);
-          smFocusY = smoothDamp(smFocusY, lineState.lineWorldY, camVel, "y", 0.5, dt);
+          smFocusY = smoothDamp(smFocusY, focusWorldY, camVel, "y", 0.5, dt);
         }
 
-        // Portrait phones: less left margin and cursor further right, so more of the line fits on screen
-        const portrait = vh > vw;
-        const startMargin = vw * (portrait ? 0.05 : 0.13);
-        const excess = smFocusX * camScale - vw * (portrait ? 0.74 : 0.44);
+        const startMargin = vw * (wrapMode ? 0.06 : 0.13);
+        const excess = smFocusX * camScale - vw * 0.44;
         const k = 120;
         const softPan = 0.5 * (excess + Math.sqrt(excess * excess + k * k)); // soft-knee: no corner kink
         camX = startMargin - softPan;
@@ -476,7 +485,7 @@
           ? punchU * punchU * Math.exp(2 * (1 - punchU))
           : 0;
         const zoomK = PUNCH_AMP * punch;
-        const pivotX = vw * (portrait ? 0.74 : 0.44);
+        const pivotX = vw * (wrapMode ? 0.5 : 0.44);
         const pivotY = vh * 0.55;
         const outX = camX + zoomK * (camX - pivotX) + shakeX;
         const outY = camY + zoomK * (camY - pivotY) + shakeY + PUNCH_DROP_PX * punch;
