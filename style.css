@@ -1,0 +1,210 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: #000000;
+  color: #d4d4d4;
+  font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+  font-variant-ligatures: none;
+  -webkit-font-smoothing: antialiased;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  user-select: none;
+  position: relative;
+}
+
+/* Moody dark-crimson vignette for poison/doubt (keeps center dark & sharp) */
+.dramatic-backdrop {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(60, 0, 12, 0.10) 20%,
+    rgba(145, 8, 30, 0.36) 72%,
+    rgba(195, 10, 40, 0.52) 100%
+  );
+  opacity: 0;
+  /* slow, soft exit */
+  transition: opacity 0.9s cubic-bezier(0.23, 1, 0.32, 1);
+  z-index: 0;
+}
+
+body.dramatic-active .dramatic-backdrop {
+  opacity: 1;
+  /* quicker, but no longer a hard cut, on the way in */
+  transition-duration: 0.45s;
+}
+
+/* Punchy beat flash when poison / doubt locks in */
+.flash-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at center,
+    rgba(255, 242, 246, 0.42) 0%,
+    rgba(255, 45, 85, 0.22) 55%,
+    rgba(0, 0, 0, 0) 95%
+  );
+  opacity: 0;
+  z-index: 3;
+}
+
+.flash-overlay.pulse {
+  animation: screen-flash 0.8s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+/* short soft attack (~100ms) so the flash never hard-cuts on, then a long ease-out */
+@keyframes screen-flash {
+  0%   { opacity: 0;   animation-timing-function: cubic-bezier(0.77, 0, 0.175, 1); }
+  10%  { opacity: 0.9; animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1); }
+  100% { opacity: 0; }
+}
+
+.viewport {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.camera {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+.terminal {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  font-size: clamp(26px, 3.5vw, 46px);
+  line-height: 1.45;
+  padding: 20px 0;
+}
+
+.line {
+  position: relative;
+  min-height: 1.45em;
+  white-space: nowrap;
+  transition: opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.line-inner {
+  display: inline-block;
+  white-space: pre;
+}
+
+.settled {
+  display: inline-block;
+}
+
+.line.old-1 { opacity: 0.28; }
+.line.old-2 { opacity: 0.11; }
+.line.old-3 { opacity: 0.04; }
+.line.hidden-old { opacity: 0; pointer-events: none; }
+
+/* IDE Syntax Highlighting (VS Code Dark+) */
+.var           { color: #9cdcfe; }
+.fn            { color: #dcdcaa; }
+.method        { color: #dcdcaa; }
+.key           { color: #9cdcfe; }
+.str           { color: #ce9178; }
+.punc          { color: #d4d4d4; }
+.bracket-round { color: #ffd700; }
+.bracket-curly { color: #da70d6; }
+.comment       { color: #6a9955; font-style: italic; }
+
+/* Scramble Effects */
+.scrambling {
+  color: #ffffff;
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.45);
+}
+
+.scramble-ghost {
+  opacity: 0.44;
+}
+
+/* Dramatic Poison / Doubt Effects */
+.str.dramatic {
+  color: #ff2447;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-shadow:
+    0 0 18px rgba(255, 36, 71, 0.9),
+    0 0 42px rgba(225, 29, 72, 0.6);
+}
+
+.scrambling.dramatic-char {
+  color: #ff1a3f;
+  font-weight: 700;
+  text-shadow:
+    -3.5px 0 rgba(255, 20, 60, 0.98),
+     3.5px 0 rgba(56, 189, 248, 0.9),
+     0 0 24px rgba(255, 26, 63, 1);
+}
+
+.scramble-ghost.dramatic-ghost {
+  color: #fb7185;
+  opacity: 0.82;
+  text-shadow: 0 0 14px rgba(225, 29, 72, 0.85);
+}
+
+.line-inner.dramatic-hit {
+  transform-origin: left center;
+  animation: dramatic-flash 0.95s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@keyframes dramatic-flash {
+  0%   {
+    filter: brightness(1);
+    transform: scale(1);
+    text-shadow: 0 0 0 rgba(255, 255, 255, 0), 0 0 0 rgba(255, 36, 71, 0);
+    animation-timing-function: cubic-bezier(0.77, 0, 0.175, 1);
+  }
+  10%  {
+    filter: brightness(2.2);
+    transform: scale(1.025);
+    text-shadow: 0 0 28px rgba(255, 255, 255, 0.85), 0 0 52px rgba(255, 36, 71, 0.9);
+    animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  100% {
+    filter: brightness(1);
+    transform: scale(1);
+    text-shadow: 0 0 0 rgba(255, 255, 255, 0), 0 0 0 rgba(255, 36, 71, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .line-inner.dramatic-hit { animation-duration: 0.4s; }
+  @keyframes dramatic-flash {
+    0%   { filter: brightness(1.4); transform: none; text-shadow: none; }
+    100% { filter: brightness(1);   transform: none; text-shadow: none; }
+  }
+}
+
+/* Red block cursor */
+.cursor {
+  display: inline-block;
+  width: 0.50em;
+  height: 1.08em;
+  background: #e11d48;
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  animation: blink 0.9s steps(1) infinite;
+}
+
+@keyframes blink {
+  0%, 65% { opacity: 1; }
+  66%, 100% { opacity: 0; }
+}

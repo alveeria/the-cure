@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Cure.exe</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="dramatic-backdrop"></div>
+  <div class="flash-overlay" id="flash"></div>
+  <div class="viewport">
+    <div class="camera" id="camera">
+      <div class="terminal" id="terminal"></div>
+    </div>
+  </div>
+
+  <audio id="bgm" src="lagu.mp3" preload="auto"></audio>
+
+  <script>
+    const SCRAMBLE_CHARS = "$X?@#/%>&*!~+=^01{}[]";
+
+    const callLine = (time, endTime, objOrFn, methodName, arg, key, val, opts = {}) => {
+      const { slowWeight = 0, dramatic = false } = opts;
+      const tokens = methodName
+        ? [
+            { t: objOrFn, c: "var" },
+            { t: ".", c: "punc" },
+            { t: methodName, c: "method" }
+          ]
+        : [{ t: objOrFn, c: "fn" }];
+
+      tokens.push(
+        { t: "( ", c: "bracket-round" },
+        { t: `"${arg}"`, c: "str" },
+        { t: " )", c: "bracket-round" },
+        { t: "{ ", c: "bracket-curly" },
+        { t: key, c: "key" },
+        { t: ": ", c: "punc" },
+        { t: `"${val}"`, c: dramatic ? "str dramatic" : "str", slowWeight, dramatic },
+        { t: " }", c: "bracket-curly" },
+        { t: ";", c: "punc" }
+      );
+
+      return { time, endTime, tokens };
+    };
+
+    const objLine = (time, endTime, key, val, opts = {}) => {
+      const { slowWeight = 0, dramatic = false } = opts;
+      return {
+        time,
+        endTime,
+        tokens: [
+          { t: "{ ", c: "bracket-curly" },
+          { t: key, c: "key" },
+          { t: ": ", c: "punc" },
+          { t: `"${val}"`, c: dramatic ? "str dramatic" : "str", slowWeight, dramatic },
+          { t: " }", c: "bracket-curly" },
+          { t: ";", c: "punc" }
+        ]
+      };
+    };
+
+    const commentLine = (time, endTime, text) => ({
+      time,
+      endTime,
+      tokens: [{ t: `// ${text}`, c: "comment" }]
+    });
+
+    const LYRICS = [
+      callLine(0.85,  3.45, "why", "cant", "you_come", "stitch", "me_up"),
+      callLine(3.65,  7.00, "why", "cant", "it_ever", "be", "enough", { slowWeight: 2.8 }),
+      callLine(7.30,  10.45, "why", "cant", "you_come", "stitch", "me_up"),
+      callLine(10.70, 17.80, "why", "cant", "it_ever", "be", "enough", { slowWeight: 6.8 }),
+      objLine(19.20,  23.65, "its_not", "enough", { slowWeight: 6.0 }),
+      commentLine(23.95, 25.45, "........."),
+      callLine(25.75, 29.40, "oh", "because", "my_head", "is_full_of", "poison", { slowWeight: 4.4, dramatic: true }),
+      callLine(29.65, 32.90, "and", "", "my_heart", "is_full_of", "doubt", { slowWeight: 4.6, dramatic: true }),
+      callLine(33.15, 36.35, "i", "got", "toxins", "in", "my_bloodstream"),
+      {
+        time: 36.55,
+        endTime: 39.45,
+        tokens: [
+          { t: "you", c: "var" },
+          { t: ".", c: "punc" },
+          { t: "tried_so_hard", c: "method" },
+          { t: "{ ", c: "bracket-curly" },
+          { t: "to", c: "key" },
+          { t: ": ", c: "punc" },
+          { t: '"suck_out"', c: "str" },
+          { t: " }", c: "bracket-curly" },
+          { t: ";", c: "punc" }
+        ]
+      },
+      callLine(39.75, 42.70, "and", "", "it_feels", "like", "medication"),
+      callLine(42.95, 45.70, "and", "", "its_good", "for_me", "im_sure"),
+      callLine(45.95, 50.25, "but", "", "it_dont_matter", "how", "your_love_feels_anymore"),
+      objLine(50.55,  53.65, "itll_never_be", "the_cure"),
+      commentLine(53.95, 55.60, "The Cure")
+    ];
+
+    const camera = document.getElementById("camera");
+    const terminal = document.getElementById("terminal");
+    const flash = document.getElementById("flash");
+    const audio = document.getElementById("bgm");
+
+    let started = false;
+    let useAudioClock = false;
+    let smoothElapsed = 0;
+
+    // Unified rAF playback + camera state
+    let currentLineIdx = -1;
+    let lineState = null;
+
+    let activeCharWidth = 25;
+    let isDramaticNow = false;
+    let dramaticIntensity = 0;
+    let camInitialized = false;
+    let camX = 0;
+    let camY = 0;
+    let camScale = 1;
+    const camVel = { x: 0, y: 0, scale: 0 };
+    const SHAKE_PX = 2.4; // peak shake in screen px (was ~7px + noise) — raise/lower to taste
+    // Release "punch": a smooth bump (zoom + small downward thud) that starts at 0 with zero slope,
+    // peaks, then has a soft tail — instead of injecting velocity into the spring, which made the camera jolt.
+    const PUNCH_AMP = 0.065;    // peak extra zoom (6.5%) — raise for a harder hit
+    const PUNCH_DROP_PX = 9;    // peak downward thud in px
+    const PUNCH_PEAK = 0.14;    // seconds until the bump peaks (lower = snappier)
+    let punchStart = -1e9;
+    let dramaticMid = 0;      // first stage of the 2-stage intensity filter
+    // Camera-follow lead: seconds of typing the target runs ahead of the cursor (cancels spring lag)
+    const CAM_LEAD = 0.34; // ≈ X smoothTime, so the slower follow still sits on the cursor
+    let focusLineIdx = -1, prevFocusX = 0, focusVel = 0;
+    let smFocusX = 0, smFocusY = 0; // smoothed world-space focus the camera is anchored to
+    const TAU = Math.PI * 2;
+    const reduceMotionMQ = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let lastFrameTime = performance.now();
+
+    function measureCharWidth() {
+      const probe = document.createElement("span");
+      probe.className = "line";
+      probe.style.position = "absolute";
+      probe.style.visibility = "hidden";
+      probe.textContent = "MMMMMMMMMM";
+      terminal.appendChild(probe);
+      const w = probe.getBoundingClientRect().width / 10;
+      probe.remove();
+      return w || 25;
+    }
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function pickRandomChar(prev) {
+      let ch = prev;
+      while (ch === prev) {
+        ch = SCRAMBLE_CHARS[Math.floor(Math.random() * SCRAMBLE_CHARS.length)];
+      }
+      return ch;
+    }
+
+    function flattenTokens(tokens) {
+      const chars = [];
+      for (const tok of tokens) {
+        const len = tok.t.length;
+        for (let idx = 0; idx < len; idx++) {
+          const ch = tok.t[idx];
+          const isInnerWord = ch !== '"';
+          const weight = tok.slowWeight && isInnerWord ? tok.slowWeight : ch === " " ? 0.35 : 1.0;
+          const dramatic = Boolean(tok.dramatic) && isInnerWord;
+          chars.push({ ch, c: tok.c, dramatic, weight });
+        }
+      }
+      return chars;
+    }
+
+    function triggerFlash(innerEl) {
+      flash.classList.remove("pulse");
+      void flash.offsetWidth;
+      flash.classList.add("pulse");
+
+      if (innerEl) {
+        innerEl.classList.remove("dramatic-hit");
+        void innerEl.offsetWidth;
+        innerEl.classList.add("dramatic-hit");
+      }
+    }
+
+    function initLine(idx) {
+      const lineObj = LYRICS[idx];
+      const existing = Array.from(terminal.children);
+      existing.forEach((el, i) => {
+        el.classList.remove("old-1", "old-2", "old-3", "hidden-old");
+        const age = existing.length - i;
+        if (age === 1) el.classList.add("old-1");
+        else if (age === 2) el.classList.add("old-2");
+        else if (age === 3) el.classList.add("old-3");
+        else el.classList.add("hidden-old");
+
+        const oldCursor = el.querySelector(".cursor");
+        if (oldCursor) oldCursor.remove();
+      });
+
+      const lineEl = document.createElement("div");
+      lineEl.className = "line";
+
+      const innerEl = document.createElement("span");
+      innerEl.className = "line-inner";
+
+      const settledSpan = document.createElement("span");
+      settledSpan.className = "settled";
+
+      const scrambleSpan = document.createElement("span");
+      scrambleSpan.className = "scramble-tail";
+
+      const cursorEl = document.createElement("span");
+      cursorEl.className = "cursor";
+
+      innerEl.append(settledSpan, scrambleSpan, cursorEl);
+      lineEl.appendChild(innerEl);
+      terminal.appendChild(lineEl);
+
+      activeCharWidth = measureCharWidth();
+      const chars = flattenTokens(lineObj.tokens);
+      const totalWeight = chars.reduce((sum, c) => sum + c.weight, 0) || 1;
+      const startAt = Math.max(lineObj.time, smoothElapsed);
+      const duration = Math.max(0.4, lineObj.endTime - startAt);
+
+      let accWeight = 0;
+      const charStartTimes = [];
+      const charEndTimes = [];
+      chars.forEach((c) => {
+        charStartTimes.push(startAt + (accWeight / totalWeight) * duration);
+        accWeight += c.weight;
+        charEndTimes.push(startAt + (accWeight / totalWeight) * duration);
+      });
+
+      return {
+        idx,
+        startAt,
+        endAt: startAt + duration,
+        lineEl,
+        innerEl,
+        settledSpan,
+        scrambleSpan,
+        chars,
+        charStartTimes,
+        charEndTimes,
+        charIdx: 0,
+        settledWidth: 0,
+        lineWorldY: lineEl.offsetTop + lineEl.offsetHeight * 0.5,
+        wasDramatic: false,
+        lastScrambleAt: 0,
+        lastRand: "",
+        dramaticFadeTimer: null
+      };
+    }
+
+    function updateScrambleUI(state, now) {
+      const cur = state.chars[state.charIdx];
+      if (!cur || cur.ch === " ") {
+        if (state.scrambleSpan.innerHTML !== "") {
+          state.scrambleSpan.innerHTML = "";
+        }
+        return;
+      }
+
+      const interval = cur.dramatic ? 18 : 24;
+      if (now - state.lastScrambleAt < interval) return;
+      state.lastScrambleAt = now;
+
+      state.lastRand = pickRandomChar(state.lastRand);
+      const ghostCount = cur.dramatic ? 3 : 1;
+      const extraClass = cur.dramatic ? "scrambling dramatic-char" : "scrambling";
+      let html = `<span class="${cur.c} ${extraClass}">${escapeHtml(state.lastRand)}</span>`;
+
+      for (let g = 1; g <= ghostCount; g++) {
+        const target = state.chars[state.charIdx + g];
+        if (!target || target.ch === " ") break;
+        const ghostChar = pickRandomChar("");
+        const ghostCls = target.dramatic ? "scramble-ghost dramatic-ghost" : "scramble-ghost";
+        html += `<span class="${target.c} ${ghostCls}">${escapeHtml(ghostChar)}</span>`;
+      }
+
+      state.scrambleSpan.innerHTML = html;
+    }
+
+    function stepTyping(now) {
+      // Start next line as soon as previous line finished and next timestamp arrives
+      const nextIdx = currentLineIdx + 1;
+      if (nextIdx < LYRICS.length) {
+        const prevFinished = !lineState || lineState.charIdx >= lineState.chars.length;
+        if (prevFinished && smoothElapsed >= LYRICS[nextIdx].time) {
+          currentLineIdx = nextIdx;
+          isDramaticNow = false;
+          lineState = initLine(currentLineIdx);
+        }
+      }
+
+      if (!lineState) return;
+
+      // Advance all characters whose endTime has passed
+      let settledAny = false;
+      while (
+        lineState.charIdx < lineState.chars.length &&
+        smoothElapsed >= lineState.charEndTimes[lineState.charIdx]
+      ) {
+        const cur = lineState.chars[lineState.charIdx];
+        const span = document.createElement("span");
+        span.className = cur.c;
+        span.textContent = cur.ch;
+        lineState.settledSpan.appendChild(span);
+
+        lineState.charIdx++;
+        settledAny = true;
+        lineState.lastScrambleAt = 0;
+      }
+
+      if (settledAny) {
+        lineState.settledWidth = lineState.settledSpan.offsetWidth;
+      }
+
+      if (lineState.charIdx < lineState.chars.length) {
+        const cur = lineState.chars[lineState.charIdx];
+        if (cur.dramatic && !lineState.wasDramatic) {
+          lineState.wasDramatic = true;
+          isDramaticNow = true;
+          if (lineState.dramaticFadeTimer) clearTimeout(lineState.dramaticFadeTimer);
+          document.body.classList.add("dramatic-active");
+        } else if (!cur.dramatic && lineState.wasDramatic) {
+          lineState.wasDramatic = false;
+          isDramaticNow = false;
+          triggerFlash(lineState.innerEl);
+          punchStart = now;
+          lineState.dramaticFadeTimer = setTimeout(() => {
+            document.body.classList.remove("dramatic-active");
+          }, 550);
+        }
+
+        updateScrambleUI(lineState, now);
+      } else {
+        if (lineState.scrambleSpan.innerHTML !== "") {
+          lineState.scrambleSpan.innerHTML = "";
+        }
+        isDramaticNow = false;
+      }
+    }
+
+    // Critically damped spring (C1 continuous, zero initial snap or overshoot)
+    function smoothDamp(current, target, velObj, key, smoothTime, dt) {
+      const omega = 2 / Math.max(0.01, smoothTime);
+      const x = omega * dt;
+      const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+      const change = current - target;
+      const temp = (velObj[key] + omega * change) * dt;
+      velObj[key] = (velObj[key] - omega * temp) * exp;
+      return target + (change + temp) * exp;
+    }
+
+    function tick(now) {
+      const dt = Math.min(0.04, Math.max(0.001, (now - lastFrameTime) / 1000));
+      lastFrameTime = now;
+
+      if (started) {
+        // Phase-locked smooth clock (eliminates coarse audio.currentTime stepping)
+        if (useAudioClock && !audio.paused && !audio.ended) {
+          smoothElapsed += dt * (audio.playbackRate || 1);
+          const drift = audio.currentTime - smoothElapsed;
+          if (Math.abs(drift) > 0.25) {
+            smoothElapsed = audio.currentTime;
+          } else {
+            smoothElapsed += drift * Math.min(1, 5 * dt);
+          }
+        } else if (!audio.ended) {
+          smoothElapsed += dt;
+        }
+
+        stepTyping(now);
+      }
+
+      if (lineState) {
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+
+        let subFrac = 0;
+        if (lineState.charIdx < lineState.chars.length) {
+          const t0 = lineState.charStartTimes[lineState.charIdx];
+          const t1 = lineState.charEndTimes[lineState.charIdx];
+          const span = t1 - t0;
+          subFrac = span > 0 ? Math.max(0, Math.min(1, (smoothElapsed - t0) / span)) : 0;
+        }
+
+        const rawFocusX = lineState.settledWidth + subFrac * activeCharWidth;
+
+        // Lead compensation: a critically damped spring trails a moving target by ~its smoothTime.
+        // Estimate (smoothed) typing speed and aim slightly ahead so the camera sits on the cursor, not behind it.
+        if (focusLineIdx === lineState.idx) {
+          const inst = (rawFocusX - prevFocusX) / dt;
+          focusVel += (inst - focusVel) * (1 - Math.exp(-10 * dt));
+        } else {
+          focusVel = 0;
+          focusLineIdx = lineState.idx;
+        }
+        prevFocusX = rawFocusX;
+        const leadPx = Math.max(0, Math.min(activeCharWidth * 5, focusVel * CAM_LEAD));
+        const focusWorldX = rawFocusX + leadPx;
+        const lineProgress = lineState.chars.length ? lineState.charIdx / lineState.chars.length : 0;
+        const lineAge = Math.max(0, smoothElapsed - lineState.startAt);
+
+        // Snappy ramp-up on poison/doubt, smooth ease-out after
+        // Anticipate: start the zoom ~2 chars before the dramatic word so it has arrived when the word does
+        const ci = lineState.charIdx;
+        const dramaticSoon = isDramaticNow ||
+          Boolean(lineState.chars[ci + 1] && lineState.chars[ci + 1].dramatic) ||
+          Boolean(lineState.chars[ci + 2] && lineState.chars[ci + 2].dramatic) ||
+          Boolean(lineState.chars[ci + 3] && lineState.chars[ci + 3].dramatic);
+        const targetDramatic = dramaticSoon ? 1 : 0;
+        // Two cascaded one-pole filters = S-curve with zero initial slope (a single one starts at max slope = a kink)
+        const dramaticRate = dramaticSoon ? 8 : 4;
+        const dramaticK = 1 - Math.exp(-dramaticRate * dt);
+        dramaticMid += (targetDramatic - dramaticMid) * dramaticK;
+        dramaticIntensity += (dramaticMid - dramaticIntensity) * dramaticK;
+
+        // Purely time-based zoom breath (zero feedback loop with camera velocity)
+        const swipeBreath = lineState.idx > 0 ? Math.exp(-lineAge * 3.6) * 0.08 : 0;
+        const normalZoom = 1.0 + lineProgress * 0.06 - swipeBreath;
+        const dramaticZoom = 1.32;
+        const targetScale = normalZoom * (1 - dramaticIntensity) + dramaticZoom * dramaticIntensity;
+
+        // 1) Smooth the zoom first.
+        if (!camInitialized) {
+          camScale = targetScale;
+        } else {
+          camScale = smoothDamp(camScale, targetScale, camVel, "scale", 0.5, dt);
+        }
+
+        // 2) Smooth the FOCUS POINT in world space (not the camera position), then derive the camera from the
+        //    zoom that is actually on screen. The focus stays pinned to its screen mark while the zoom swings
+        //    (poison/doubt in & out, swipe-breath), so the zoom can no longer pull the cursor off-sync.
+        //    (Smoothing camX/camY directly stacked two spring lags — worst on lower lines where lineWorldY is large.)
+        if (!camInitialized) {
+          smFocusX = focusWorldX;
+          smFocusY = lineState.lineWorldY;
+          camInitialized = true;
+        } else {
+          smFocusX = smoothDamp(smFocusX, focusWorldX, camVel, "x", 0.36, dt);
+          smFocusY = smoothDamp(smFocusY, lineState.lineWorldY, camVel, "y", 0.5, dt);
+        }
+
+        const startMargin = vw * 0.13;
+        const excess = smFocusX * camScale - vw * 0.44;
+        const k = 120;
+        const softPan = 0.5 * (excess + Math.sqrt(excess * excess + k * k)); // soft-knee: no corner kink
+        camX = startMargin - softPan;
+        camY = vh * 0.55 - smFocusY * camScale;
+
+        // Soft tremor: slow, smooth sines only (no per-frame random = no white-noise jitter).
+        // Envelope is squared so the shake eases in/out instead of snapping on.
+        const shakeAmp = reduceMotionMQ.matches ? 0 : SHAKE_PX * dramaticIntensity * dramaticIntensity;
+        const tSec = now / 1000;
+        const shakeX = shakeAmp * (Math.sin(tSec * TAU * 5.3) * 0.6 + Math.sin(tSec * TAU * 8.9 + 1.7) * 0.4);
+        const shakeY = shakeAmp * 0.72 * (Math.sin(tSec * TAU * 6.1 + 0.9) * 0.6 + Math.sin(tSec * TAU * 9.7 + 2.6) * 0.4);
+
+        // Release punch, applied AFTER the camera spring so it isn't damped away.
+        // Bump shape u²·e^(2(1-u)): 0 at start with zero slope, peak 1 at u=1, soft tail — smooth by construction.
+        // Zoom pivots around the text focus point (not the top-left origin) so the screen doesn't slide.
+        const punchU = (now - punchStart) / 1000 / PUNCH_PEAK;
+        const punch = punchU > 0 && punchU < 8 && !reduceMotionMQ.matches
+          ? punchU * punchU * Math.exp(2 * (1 - punchU))
+          : 0;
+        const zoomK = PUNCH_AMP * punch;
+        const pivotX = vw * 0.44;
+        const pivotY = vh * 0.55;
+        const outX = camX + zoomK * (camX - pivotX) + shakeX;
+        const outY = camY + zoomK * (camY - pivotY) + shakeY + PUNCH_DROP_PX * punch;
+        const outScale = camScale * (1 + zoomK);
+
+        camera.style.transform = `translate3d(${outX.toFixed(2)}px, ${outY.toFixed(2)}px, 0) scale(${outScale.toFixed(5)})`;
+      }
+
+      requestAnimationFrame(tick);
+    }
+
+    requestAnimationFrame(tick);
+
+    async function tryUnlockAudio() {
+      if (useAudioClock) return;
+      try {
+        await audio.play();
+        if (Number.isFinite(audio.duration) && audio.duration > 0) {
+          audio.currentTime = Math.min(smoothElapsed, Math.max(0, audio.duration - 0.1));
+        } else {
+          audio.currentTime = smoothElapsed;
+        }
+        useAudioClock = true;
+      } catch {
+        window.addEventListener("pointerdown", tryUnlockAudio, { once: true });
+      }
+    }
+
+    async function startShow() {
+      if (started) return;
+      started = true;
+      smoothElapsed = 0;
+      lastFrameTime = performance.now();
+
+      try {
+        await audio.play();
+        smoothElapsed = audio.currentTime || 0;
+        useAudioClock = true;
+      } catch {
+        useAudioClock = false;
+        window.addEventListener("pointerdown", tryUnlockAudio, { once: true });
+        window.addEventListener("keydown", tryUnlockAudio, { once: true });
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", startShow);
+  </script>
+</body>
+</html>
