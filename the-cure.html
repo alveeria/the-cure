@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
   <title>The Cure.exe</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -451,8 +452,10 @@
           smFocusY = smoothDamp(smFocusY, lineState.lineWorldY, camVel, "y", 0.5, dt);
         }
 
-        const startMargin = vw * 0.13;
-        const excess = smFocusX * camScale - vw * 0.44;
+        // Portrait phones: less left margin and cursor further right, so more of the line fits on screen
+        const portrait = vh > vw;
+        const startMargin = vw * (portrait ? 0.05 : 0.13);
+        const excess = smFocusX * camScale - vw * (portrait ? 0.74 : 0.44);
         const k = 120;
         const softPan = 0.5 * (excess + Math.sqrt(excess * excess + k * k)); // soft-knee: no corner kink
         camX = startMargin - softPan;
@@ -473,7 +476,7 @@
           ? punchU * punchU * Math.exp(2 * (1 - punchU))
           : 0;
         const zoomK = PUNCH_AMP * punch;
-        const pivotX = vw * 0.44;
+        const pivotX = vw * (portrait ? 0.74 : 0.44);
         const pivotY = vh * 0.55;
         const outX = camX + zoomK * (camX - pivotX) + shakeX;
         const outY = camY + zoomK * (camY - pivotY) + shakeY + PUNCH_DROP_PX * punch;
@@ -520,6 +523,19 @@
     }
 
     window.addEventListener("DOMContentLoaded", startShow);
+
+    // Rotation / resize (font size can change at the mobile breakpoint): re-measure the active line
+    // so the camera keeps framing it correctly.
+    let resizeRaf = 0;
+    window.addEventListener("resize", () => {
+      cancelAnimationFrame(resizeRaf);
+      resizeRaf = requestAnimationFrame(() => {
+        if (!lineState) return;
+        activeCharWidth = measureCharWidth();
+        lineState.settledWidth = lineState.settledSpan.offsetWidth;
+        lineState.lineWorldY = lineState.lineEl.offsetTop + lineState.lineEl.offsetHeight * 0.5;
+      });
+    });
   </script>
 </body>
 </html>
