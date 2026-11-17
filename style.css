@@ -13,10 +13,23 @@ body {
   font-variant-ligatures: none;
   -webkit-font-smoothing: antialiased;
   height: 100vh;
+  height: 100dvh; /* mobile: follows the visible area when browser toolbars show/hide */
   width: 100vw;
   overflow: hidden;
   user-select: none;
+  -webkit-user-select: none;
   position: relative;
+  /* mobile: no pull-to-refresh, double-tap zoom, tap flash or auto text inflation */
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+html {
+  background: #000000;
+  overscroll-behavior: none;
 }
 
 /* Moody dark-crimson vignette for poison/doubt (keeps center dark & sharp) */
@@ -91,6 +104,22 @@ body.dramatic-active .dramatic-backdrop {
   font-size: clamp(26px, 3.5vw, 46px);
   line-height: 1.45;
   padding: 20px 0;
+}
+
+/* Phones (portrait or small landscape): smaller type and tighter spacing. Desktop is unchanged. */
+@media (max-width: 640px), (max-height: 500px) {
+  .terminal {
+    font-size: clamp(17px, 5vw, 26px);
+    gap: 18px;
+  }
+}
+
+/* Portrait phones: narrow screen, so smaller type fits more of each line */
+@media (orientation: portrait) and (max-width: 640px) {
+  .terminal {
+    font-size: clamp(13px, 4vw, 20px);
+    gap: 14px;
+  }
 }
 
 .line {
